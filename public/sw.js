@@ -1,5 +1,5 @@
 // Service Worker for MediCare SaaS
-const CACHE_NAME = 'medicare-v2'
+const CACHE_NAME = 'medicare-v3'
 const urlsToCache = ['/']
 
 // ─── Install ──────────────────────────────────────────────────────────────────
@@ -39,8 +39,8 @@ self.addEventListener('message', (event) => {
   event.waitUntil(
     self.registration.showNotification(title || 'MediCare SaaS', {
       body: body || 'New notification',
-      icon: '/icon-dark-32x32.png',
-      badge: '/icon-light-32x32.png',
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
       tag: tag || 'medicare-local',
       requireInteraction: false,
     })
@@ -56,8 +56,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: '/icon-dark-32x32.png',
-      badge: '/icon-light-32x32.png',
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
       tag: 'medicare-push',
       requireInteraction: false,
     })
@@ -77,13 +77,41 @@ self.addEventListener('notificationclick', (event) => {
   )
 })
 
-// ─── Fetch (network-first for API, cache-first for assets) ───────────────────
+// ─── Fetch (Network First for HTML, Cache First for Assets) ───────────────────
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
 
+  // For HTML navigation requests (like loading the app), always go to network first!
+  // This ensures the user always gets the latest index.html with the newest JS hashes.
+  if (event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          // Clone and update cache with the fresh HTML
+          const responseClone = response.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone))
+          return response
+        })
+        .catch(() => caches.match(event.request)) // Fallback to cache ONLY if offline
+    )
+    return
+  }
+
+  // For static assets (JS, CSS, images), try cache first, then network
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).catch(() => undefined)
+      if (cached) return cached
+
+      return fetch(event.request).then((response) => {
+        // Don't cache if not a valid response
+        if (!response || response.status !== 200 || response.type !== 'basic') {
+          return response
+        }
+        
+        const responseClone = response.clone()
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone))
+        return response
+      }).catch(() => undefined)
     })
   )
 })
